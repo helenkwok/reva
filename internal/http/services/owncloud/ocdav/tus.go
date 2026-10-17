@@ -243,6 +243,11 @@ func (s *svc) handleTusPost(ctx context.Context, w http.ResponseWriter, r *http.
 			Map: opaqueMap,
 		},
 	}
+	// hand If-Match to the storage, like PUT does, so it is checked again when the upload finishes.
+	// The check above only sees the etag at creation time; two uploads created before either finishes both pass it.
+	if ifMatch := r.Header.Get(net.HeaderIfMatch); ifMatch != "" {
+		uReq.Options = &provider.InitiateFileUploadRequest_IfMatch{IfMatch: ifMatch}
+	}
 
 	uRes, err := client.InitiateFileUpload(ctx, uReq)
 	if err != nil {

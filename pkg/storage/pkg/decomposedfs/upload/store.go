@@ -310,7 +310,7 @@ func (store DecomposedFsStore) updateExistingNode(ctx context.Context, session *
 	if err != nil {
 		return unlock, err
 	}
-	oldNodeEtag, err := node.CalculateEtag(old.ID, oldNodeMtime)
+	oldNodeEtag, err := node.CalculateFileEtag(old.ID, old.BlobID, oldNodeMtime)
 	if err != nil {
 		return unlock, err
 	}

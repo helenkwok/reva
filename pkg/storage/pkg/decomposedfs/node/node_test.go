@@ -68,6 +68,24 @@ var _ = Describe("Node", func() {
 		}
 	})
 
+	Describe("CalculateFileEtag", func() {
+		mtime := time.Date(2026, 10, 17, 11, 22, 0, 0, time.UTC)
+
+		It("gives two uploads in the same mtime second different etags", func() {
+			a, err := node.CalculateFileEtag("id", "blob-a", mtime)
+			Expect(err).ToNot(HaveOccurred())
+			b, err := node.CalculateFileEtag("id", "blob-b", mtime)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(a).ToNot(Equal(b))
+		})
+
+		It("keeps the etag of nodes without a blob, like directories", func() {
+			old, err := node.CalculateEtag("id", mtime)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(node.CalculateFileEtag("id", "", mtime)).To(Equal(old))
+		})
+	})
+
 	Describe("New", func() {
 		It("generates unique blob ids if none are given", func() {
 			n1 := node.New(env.SpaceRootRes.SpaceId, id, "", name, 10, "", provider.ResourceType_RESOURCE_TYPE_FILE, env.Owner.Id, env.Lookup)

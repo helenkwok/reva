@@ -732,15 +732,20 @@ func (n *Node) LockFilePaths() []string {
 
 // CalculateEtag returns a hash of fileid + tmtime (or mtime)
 func CalculateEtag(id string, tmTime time.Time) (string, error) {
+	return CalculateFileEtag(id, "", tmTime)
+}
+
+// CalculateFileEtag is CalculateEtag plus the blob id. Each upload or assimilation gets a new blob id, so two
+// different contents saved within the same mtime second get different etags. An empty blob id (containers) gives
+// the same etag as CalculateEtag, so directory etags don't change.
+func CalculateFileEtag(id, blobID string, tmTime time.Time) (string, error) {
 	h := md5.New()
 	if _, err := io.WriteString(h, id); err != nil {
 		return "", err
 	}
-	/* TODO we could strengthen the etag by adding the blobid, but then all etags would change. we would need a legacy etag check as well
-	if _, err := io.WriteString(h, n.BlobID); err != nil {
+	if _, err := io.WriteString(h, blobID); err != nil {
 		return "", err
 	}
-	*/
 	if tb, err := tmTime.UTC().MarshalBinary(); err == nil {
 		if _, err := h.Write(tb); err != nil {
 			return "", err
@@ -776,7 +781,7 @@ func (n *Node) SetEtag(ctx context.Context, val string) (err error) {
 		return
 	}
 	var etag string
-	if etag, err = CalculateEtag(n.ID, tmTime); err != nil {
+	if etag, err = CalculateFileEtag(n.ID, n.BlobID, tmTime); err != nil {
 		return
 	}
 
@@ -868,8 +873,6 @@ func (n *Node) AsResourceInfo(ctx context.Context, rp *provider.ResourcePermissi
 		}
 	}
 
-	// TODO make etag of files use fileid and checksum
-
 	var tmTime time.Time
 	if tmTime, err = n.GetTMTime(ctx); err != nil {
 		sublog.Debug().Err(err).Msg("could not get tmtime")
@@ -878,7 +881,7 @@ func (n *Node) AsResourceInfo(ctx context.Context, rp *provider.ResourcePermissi
 	// use temporary etag if it is set
 	if b, err := n.XattrString(ctx, prefixes.TmpEtagAttr); err == nil && b != "" {
 		ri.Etag = fmt.Sprintf(`"%x"`, b)
-	} else if ri.Etag, err = CalculateEtag(n.ID, tmTime); err != nil {
+	} else if ri.Etag, err = CalculateFileEtag(n.ID, n.BlobID, tmTime); err != nil {
 		sublog.Debug().Err(err).Msg("could not calculate etag")
 	}
 
