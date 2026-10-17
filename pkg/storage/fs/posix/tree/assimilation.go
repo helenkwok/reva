@@ -941,7 +941,24 @@ func (t *Tree) WarmupIDCache(root string, assimilate, onlyDirty bool) error {
 	}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			if path == root {
+				return err
+			}
+			// one bad entry must not end the scan of the whole storage
+			if os.IsNotExist(err) {
+				// removed between listing its parent and reading it, e.g. a temp file
+				return nil
+			}
+			t.log.Error().Err(err).Str("path", path).Msg("could not read path during scan, skipping it")
+			if info != nil && info.IsDir() {
+				// the directory itself was visited, but its entries could not be listed.
+				// keep counting its last known size for the parents.
+				if size, ok := t.storedTreeSize(path); ok {
+					addToParents(path, size)
+				}
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// skip irrelevant files
@@ -972,7 +989,8 @@ func (t *Tree) WarmupIDCache(root string, assimilate, onlyDirty bool) error {
 			if onlyDirty {
 				dirty, err := t.isDirty(path)
 				if err != nil {
-					return err
+					t.log.Error().Err(err).Str("path", path).Msg("could not read dirty flag, scanning the directory")
+					dirty = true
 				}
 				if !dirty {
 					// the stored tree size of a clean directory is still valid. Count it for the
@@ -1081,10 +1099,17 @@ func (t *Tree) WarmupIDCache(root string, assimilate, onlyDirty bool) error {
 		}
 
 		if info.IsDir() {
-			return t.setDirty(path, false)
+			if err := t.setDirty(path, false); err != nil {
+				// e.g. a directory owned by another user. It stays dirty, so the next scan looks at it again.
+				t.log.Error().Err(err).Str("path", path).Msg("could not clear dirty flag")
+			}
 		}
 		return nil
 	})
+	if err != nil {
+		// the walk ended early, so the sizes are incomplete. don't overwrite the stored tree sizes with them.
+		return err
+	}
 
 	for dir, size := range sizes {
 		if t.Ignorer.IsRootPath(dir) {
@@ -1109,10 +1134,6 @@ func (t *Tree) WarmupIDCache(root string, assimilate, onlyDirty bool) error {
 		if err := t.lookup.MetadataBackend().Set(context.Background(), n, prefixes.TreesizeAttr, []byte(fmt.Sprintf("%d", size))); err != nil {
 			t.log.Error().Err(err).Str("path", dir).Int64("size", size).Msg("could not set tree size")
 		}
-	}
-
-	if err != nil {
-		return err
 	}
 
 	return nil

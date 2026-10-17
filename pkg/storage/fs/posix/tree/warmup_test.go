@@ -34,6 +34,45 @@ var _ = Describe("WarmupIDCache", func() {
 		env.Cleanup()
 	})
 
+	Context("with entries it cannot handle", func() {
+		var locked string
+
+		BeforeEach(func() {
+			if os.Geteuid() == 0 {
+				Skip("root ignores the permissions this test relies on")
+			}
+			// sorts before the other entries, so the walk reaches it first
+			locked = filepath.Join(spaceRoot, "a-locked")
+			Expect(os.MkdirAll(locked, 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(locked, "inside.txt"), []byte("hello"), 0644)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(spaceRoot, "z-after"), 0755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(spaceRoot, "z-after", "after.txt"), []byte("hello world"), 0644)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			_ = os.Chmod(locked, 0755)
+		})
+
+		It("keeps scanning past a directory it cannot write metadata to", func() {
+			// like a directory written over SMB by another user: readable, but its xattrs can't be set
+			Expect(os.Chmod(locked, 0555)).To(Succeed())
+
+			Expect(env.Tree.WarmupIDCache(spaceRoot, true, false)).To(Succeed())
+
+			_, err := xattr.Get(filepath.Join(spaceRoot, "z-after", "after.txt"), "user.oc.id")
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("keeps scanning past a directory it cannot list", func() {
+			Expect(os.Chmod(locked, 0000)).To(Succeed())
+
+			Expect(env.Tree.WarmupIDCache(spaceRoot, true, false)).To(Succeed())
+
+			_, err := xattr.Get(filepath.Join(spaceRoot, "z-after", "after.txt"), "user.oc.id")
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
 	It("returns nil for an empty directory", func() {
 		err := env.Tree.WarmupIDCache(spaceRoot, false, false)
 		Expect(err).ToNot(HaveOccurred())
